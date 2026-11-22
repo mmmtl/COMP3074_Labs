@@ -18,6 +18,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -36,6 +37,8 @@ import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
+import com.google.android.gms.tasks.CancellationTokenSource
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
@@ -49,20 +52,24 @@ class MainActivity : ComponentActivity() {
                 val context = LocalContext.current
 
                 val locationManager = remember {
-                    ca.gbc.comp3074.tai_maria.lab5.LocationManager(
+                    LocationManager(
                         context = context,
-                        fusedLocationProviderClient = LocationServices.getFusedLocationProviderClient(context)
+                        fusedLocationProviderClient = LocationServices.getFusedLocationProviderClient(
+                            context
+                        )
                     )
                 }
 
                 val locationPermissions = rememberMultiplePermissionsState(
                     permissions = listOf(
-                        android.Manifest.permission.ACCESS_FINE_LOCATION,
-                        android.Manifest.permission.ACCESS_COARSE_LOCATION
+                        android.Manifest.permission.ACCESS_COARSE_LOCATION,
+                        android.Manifest.permission.ACCESS_FINE_LOCATION
                     )
                 )
 
-                var location by remember { mutableStateOf<Location?>(null) }
+                var location by remember {
+                    mutableStateOf<Location?>(null)
+                }
 
                 val coroutineScope = rememberCoroutineScope()
 
@@ -70,26 +77,35 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     verticalArrangement = Arrangement.Center,
                     horizontalAlignment = Alignment.CenterHorizontally
-                ){
-                    location?.let{
+                ) {
+                    location?.let {
                         Text(
                             text = "${it.latitude} ${it.longitude}",
-                            fontSize = 25.sp,
+                            fontSize = 32.sp,
                             fontWeight = FontWeight.Bold
                         )
                     }
 
+                    LaunchedEffect(locationPermissions.allPermissionsGranted){
+                        if(locationPermissions.allPermissionsGranted){
+                            location = locationManager.getLocation()
+                        }
+                    }
+
                     Button(
                         onClick = {
-                            if(!locationPermissions.allPermissionsGranted || locationPermissions.shouldShowRationale){
+                            if (locationPermissions.allPermissionsGranted) {
+                                coroutineScope.launch {
+                                    location = locationManager.getLocation()
+                                }
+                            } else {
                                 locationPermissions.launchMultiplePermissionRequest()
-                            } else{
-                                coroutineScope.launch { location = locationManager.getLocation() }
                             }
                         }
-                    ){
-                        Text(text = "Get Location")
+                    ) {
+                        Text(text = "Get my location")
                     }
+
                 }
             }
         }
@@ -119,37 +135,27 @@ class LocationManager(
         val isGpsEnabled = locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER) ||
                 locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)
 
-        if(!isGpsEnabled && !(hasGrantedCoarseLocationPermission || hasGrantedFineLocationPermission)){
+        if(!isGpsEnabled || !(hasGrantedCoarseLocationPermission || hasGrantedFineLocationPermission)){
             return null
         }
 
         return suspendCancellableCoroutine { cont ->
-            fusedLocationProviderClient.lastLocation.apply {
-                if (isComplete){
-                    if (isSuccessful){
-                        cont.resume(result)
-                    } else{
-                        cont.resume(null)
-                    }
-
-                    return@suspendCancellableCoroutine
+            fusedLocationProviderClient.getCurrentLocation(
+                Priority.PRIORITY_HIGH_ACCURACY,
+                CancellationTokenSource().token
+            )
+                .addOnSuccessListener { location ->
+                    cont.resume(location)
                 }
-
-                addOnSuccessListener {
-                    cont.resume(result)
-                }
-
-                addOnFailureListener {
+                .addOnFailureListener {
                     cont.resume(null)
                 }
-
-                addOnCanceledListener {
+                .addOnCanceledListener {
                     cont.cancel()
                 }
             }
         }
     }
-}
 
 
 
